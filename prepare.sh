@@ -23,7 +23,7 @@ fi
 # --- Overridable settings (set as host/service env vars) --------------------
 # Register this node as ephemeral (removed from the tailnet shortly after it
 # goes offline). Appends ?ephemeral=true to the auth key.
-TAILSCALE_EPHEMERAL="${TAILSCALE_EPHEMERAL:-true}"
+TAILSCALE_EPHEMERAL="${TAILSCALE_EPHEMERAL:-0}"
 # Extra flags passed verbatim to `tailscale up` (e.g. tags, routes, exit node).
 # Empty by default.
 TAILSCALE_EXTRA_ARGS="${TAILSCALE_EXTRA_ARGS:-}"
@@ -112,7 +112,7 @@ fi
 # --- Build the auth key (optionally ephemeral) ------------------------------
 # Not echoed: it is a secret.
 AUTHKEY="${TAILSCALE_AUTH_SECRET}"
-if [ "${TAILSCALE_EPHEMERAL}" = "true" ] && [[ "${AUTHKEY}" != *"ephemeral="* ]]; then
+if [ "${TAILSCALE_EPHEMERAL}" = "1" ] && [[ "${AUTHKEY}" != *"ephemeral="* ]]; then
   if [[ "${AUTHKEY}" == *"?"* ]]; then
     AUTHKEY="${AUTHKEY}&ephemeral=true"
   else
