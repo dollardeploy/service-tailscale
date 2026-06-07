@@ -1,2 +1,2 @@
-# service-tailscale
+# Tailscale
 Install on your host service for DollarDeploy
