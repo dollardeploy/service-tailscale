@@ -34,16 +34,18 @@ What it does:
 | Env var                         | Default              | Description                                                                           |
 | ------------------------------- | -------------------- | ------------------------------------------------------------------------------------- |
 | `TAILSCALE_AUTH_SECRET`         | _(required)_         | Auth key / OAuth client secret used by `tailscale up`.                                |
-| `TAILSCALE_EPHEMERAL`           | `true`               | Register as ephemeral (appends `?ephemeral=true` to the key).                         |
+| `TAILSCALE_EPHEMERAL`           | `0`                  | Register as ephemeral (appends `?ephemeral=true` to the key).                         |
 | `TAILSCALE_HOSTNAME`            | host's hostname      | Tailscale machine name (`--hostname`).                                                |
-| `TAILSCALE_ACCEPT_DNS`          | `true`               | Accept tailnet DNS config (`--accept-dns`).                                           |
+| `TAILSCALE_ACCEPT_DNS`          | `1`                  | Accept tailnet DNS config (`--accept-dns`).                                           |
 | `TAILSCALE_EXTRA_ARGS`          | _(none)_             | Extra flags passed verbatim to `tailscale up` (tags, routes, exit node).              |
-| `TAILSCALE_USERSPACE`           | `false`              | Userspace networking instead of kernel `/dev/net/tun` (`--tun=userspace-networking`). |
-| `TAILSCALE_ENABLE_METRICS`      | `true`               | Expose client metrics on the tailnet IP `:5252` (`tailscale set --webclient`).        |
+| `TAILSCALE_USERSPACE`           | `0`                  | Userspace networking instead of kernel `/dev/net/tun` (`--tun=userspace-networking`). |
+| `TAILSCALE_ENABLE_METRICS`      | `1`                  | Expose client metrics on the tailnet IP `:5252` (`tailscale set --webclient`).        |
 | `TAILSCALE_STATE_DIR`           | `/var/lib/tailscale` | State directory (informational; matches the package default).                         |
-| `TAILSCALE_AUTH_ONCE`           | `false`              | Container-only; no host equivalent (host `up` runs once, idempotently).               |
-| `TAILSCALE_ENABLE_HEALTH_CHECK` | `true`               | Container-only; on a host use `tailscale status`.                                     |
+| `TAILSCALE_AUTH_ONCE`           | `0`                  | Container-only; no host equivalent (host `up` runs once, idempotently).               |
+| `TAILSCALE_ENABLE_HEALTH_CHECK` | `1`                  | Container-only; on a host use `tailscale status`.                                     |
 | `TAILSCALE_LOCAL_ADDR_PORT`     | `0.0.0.0:4000`       | Container-only; host metrics are fixed to the tailnet IP `:5252`.                     |
+
+> Boolean settings use `1` (on) / `0` (off).
 
 > The `TAILSCALE_*` names mirror the `tailscale/tailscale` container env vars for
 > familiarity. On a host install the daemon does not read them directly — the
@@ -62,7 +64,9 @@ Tailscale >= 1.78. See [client metrics](https://tailscale.com/kb/1482/client-met
 
 ## Exported env vars
 
-The service writes these back (prefixed `SERVICE_CUSTOM_`):
+The service writes these back into its own env (emitted as
+`SERVICE_CUSTOM_<service-id>_<KEY>` so multiple custom services don't collide,
+then stored under `<KEY>`):
 
 - `TAILSCALE_HOSTNAME` — the node name
 - `TAILSCALE_IP` / `TAILSCALE_IP6` — tailnet IPv4 / IPv6

@@ -30,20 +30,20 @@ TAILSCALE_EXTRA_ARGS="${TAILSCALE_EXTRA_ARGS:-}"
 # tailscaled state directory. The apt package already stores state here.
 TAILSCALE_STATE_DIR="${TAILSCALE_STATE_DIR:-/var/lib/tailscale}"
 # Use userspace networking instead of the kernel /dev/net/tun device.
-TAILSCALE_USERSPACE="${TAILSCALE_USERSPACE:-false}"
+TAILSCALE_USERSPACE="${TAILSCALE_USERSPACE:-0}"
 # Container-only knob (containerboot). On a host `tailscale up` runs once and is
 # idempotent, so this is accepted but has no host equivalent.
-TAILSCALE_AUTH_ONCE="${TAILSCALE_AUTH_ONCE:-false}"
+TAILSCALE_AUTH_ONCE="${TAILSCALE_AUTH_ONCE:-0}"
 # Accept DNS configuration pushed by the tailnet.
-TAILSCALE_ACCEPT_DNS="${TAILSCALE_ACCEPT_DNS:-true}"
+TAILSCALE_ACCEPT_DNS="${TAILSCALE_ACCEPT_DNS:-1}"
 # Container-only knob. On a host, health is observed via `tailscale status`.
-TAILSCALE_ENABLE_HEALTH_CHECK="${TAILSCALE_ENABLE_HEALTH_CHECK:-true}"
+TAILSCALE_ENABLE_HEALTH_CHECK="${TAILSCALE_ENABLE_HEALTH_CHECK:-1}"
 # Container-only knob. On a host the metrics endpoint is fixed to the tailnet
 # IP on :5252 (see TAILSCALE_ENABLE_METRICS); kept for config compatibility.
 TAILSCALE_LOCAL_ADDR_PORT="${TAILSCALE_LOCAL_ADDR_PORT:-0.0.0.0:4000}"
 # Expose Prometheus client metrics over the tailnet only (tailscale set
 # --webclient -> http://<tailscale-ip>:5252/metrics, plus http://100.100.100.100/metrics locally).
-TAILSCALE_ENABLE_METRICS="${TAILSCALE_ENABLE_METRICS:-true}"
+TAILSCALE_ENABLE_METRICS="${TAILSCALE_ENABLE_METRICS:-1}"
 # Tailscale machine name. Defaults to the host's hostname.
 TAILSCALE_HOSTNAME="${TAILSCALE_HOSTNAME:-$(hostname)}"
 # ---------------------------------------------------------------------------
@@ -79,10 +79,10 @@ else
 fi
 
 # --- Daemon flags -----------------------------------------------------------
-# Only userspace networking needs a daemon flag; kernel mode (TAILSCALE_USERSPACE=false)
+# Only userspace networking needs a daemon flag; kernel mode (TAILSCALE_USERSPACE=0)
 # is the package default. State lives in /var/lib/tailscale by default.
 DAEMON_FLAGS=""
-if [ "${TAILSCALE_USERSPACE}" = "true" ]; then
+if [ "${TAILSCALE_USERSPACE}" = "1" ]; then
   DAEMON_FLAGS="--tun=userspace-networking"
 fi
 if [ "${TAILSCALE_STATE_DIR}" != "/var/lib/tailscale" ]; then
@@ -121,7 +121,11 @@ if [ "${TAILSCALE_EPHEMERAL}" = "1" ] && [[ "${AUTHKEY}" != *"ephemeral="* ]]; t
 fi
 
 # --- Bring the node up ------------------------------------------------------
-UP_ARGS=(--authkey="${AUTHKEY}" --hostname="${TAILSCALE_HOSTNAME}" --accept-dns="${TAILSCALE_ACCEPT_DNS}")
+# tailscale up expects true/false for --accept-dns; map from our 1/0 flag.
+ACCEPT_DNS_FLAG="false"
+[ "${TAILSCALE_ACCEPT_DNS}" = "1" ] && ACCEPT_DNS_FLAG="true"
+
+UP_ARGS=(--authkey="${AUTHKEY}" --hostname="${TAILSCALE_HOSTNAME}" --accept-dns="${ACCEPT_DNS_FLAG}")
 if [ -n "${TAILSCALE_EXTRA_ARGS}" ]; then
   read -ra EXTRA <<< "${TAILSCALE_EXTRA_ARGS}"
   UP_ARGS+=("${EXTRA[@]}")
@@ -130,7 +134,7 @@ echo "tailscale: bringing node up as '${TAILSCALE_HOSTNAME}' (ephemeral=${TAILSC
 $run tailscale up "${UP_ARGS[@]}"
 
 # --- Metrics (tailnet-internal only) ----------------------------------------
-if [ "${TAILSCALE_ENABLE_METRICS}" = "true" ]; then
+if [ "${TAILSCALE_ENABLE_METRICS}" = "1" ]; then
   echo "tailscale: enabling web client / metrics on the tailnet IP (:5252)"
   $run tailscale set --webclient \
     || echo "tailscale: could not enable --webclient (requires Tailscale >= 1.78), metrics still available at http://100.100.100.100/metrics"
@@ -146,10 +150,16 @@ if command -v jq >/dev/null 2>&1; then
 fi
 
 echo "tailscale: node IPv4 ${TAILSCALE_IP4:-unknown}, hostname ${TAILSCALE_HOSTNAME}"
-echo "{{env:SERVICE_CUSTOM_TAILSCALE_HOSTNAME:${TAILSCALE_HOSTNAME}}}"
-[ -n "${TAILSCALE_IP4}" ] && echo "{{env:SERVICE_CUSTOM_TAILSCALE_IP:${TAILSCALE_IP4}}}"
-[ -n "${TAILSCALE_IP6}" ] && echo "{{env:SERVICE_CUSTOM_TAILSCALE_IP6:${TAILSCALE_IP6}}}"
-[ -n "${TAILSCALE_DNSNAME}" ] && echo "{{env:SERVICE_CUSTOM_TAILSCALE_DNSNAME:${TAILSCALE_DNSNAME}}}"
-[ -n "${TAILSCALE_IP4}" ] && echo "{{env:SERVICE_CUSTOM_TAILSCALE_METRICS_URL:http://${TAILSCALE_IP4}:5252/metrics}}"
+
+# Push values into this service's env. Namespaced by SERVICE_ID so multiple
+# custom services don't collide (see lib/queue/prepareHost.ts). Only emitted
+# when running under DollarDeploy (SERVICE_ID is set).
+if [ -n "${SERVICE_ID:-}" ]; then
+  echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_HOSTNAME:${TAILSCALE_HOSTNAME}}}"
+  [ -n "${TAILSCALE_IP4}" ] && echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_IP:${TAILSCALE_IP4}}}"
+  [ -n "${TAILSCALE_IP6}" ] && echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_IP6:${TAILSCALE_IP6}}}"
+  [ -n "${TAILSCALE_DNSNAME}" ] && echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_DNSNAME:${TAILSCALE_DNSNAME}}}"
+  [ -n "${TAILSCALE_IP4}" ] && echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_METRICS_URL:http://${TAILSCALE_IP4}:5252/metrics}}"
+fi
 
 echo "tailscale: done"
