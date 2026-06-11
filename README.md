@@ -12,8 +12,10 @@ What it does:
 1. Installs Tailscale from `pkgs.tailscale.com` (apt) for the host's distro.
 2. Brings the node up with your auth key (`tailscale up`), optionally as an
    **ephemeral** node.
-3. Applies settings (hostname, accept-dns, extra args, userspace networking) and
-   enables IP forwarding automatically when advertising routes / an exit node.
+3. Applies settings (accept-dns, extra args, userspace networking) and enables
+   IP forwarding automatically when advertising routes / an exit node. By default
+   it lets Tailscale pick its recommended hostname; set `TAILSCALE_HOSTNAME` to
+   pin a specific name.
 4. Exposes Prometheus client metrics **over the tailnet only** (`:5252`).
 5. Exports the node's hostname / Tailscale IPs back to the service env.
 
@@ -35,7 +37,7 @@ What it does:
 | ------------------------------- | -------------------- | ------------------------------------------------------------------------------------- |
 | `TAILSCALE_AUTH_SECRET`         | _(required)_         | Auth key / OAuth client secret used by `tailscale up`.                                |
 | `TAILSCALE_EPHEMERAL`           | `0`                  | Register as ephemeral (appends `?ephemeral=true` to the key).                         |
-| `TAILSCALE_HOSTNAME`            | host's hostname      | Tailscale machine name (`--hostname`).                                                |
+| `TAILSCALE_HOSTNAME`            | _(Tailscale-chosen)_ | Tailscale machine name (`--hostname`). Empty lets Tailscale pick its recommended name. |
 | `TAILSCALE_ACCEPT_DNS`          | `1`                  | Accept tailnet DNS config (`--accept-dns`).                                           |
 | `TAILSCALE_EXTRA_ARGS`          | _(none)_             | Extra flags passed verbatim to `tailscale up` (tags, routes, exit node).              |
 | `TAILSCALE_USERSPACE`           | `0`                  | Userspace networking instead of kernel `/dev/net/tun` (`--tun=userspace-networking`). |

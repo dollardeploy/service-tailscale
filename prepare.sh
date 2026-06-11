@@ -44,8 +44,10 @@ TAILSCALE_LOCAL_ADDR_PORT="${TAILSCALE_LOCAL_ADDR_PORT:-0.0.0.0:4000}"
 # Expose Prometheus client metrics over the tailnet only (tailscale set
 # --webclient -> http://<tailscale-ip>:5252/metrics, plus http://100.100.100.100/metrics locally).
 TAILSCALE_ENABLE_METRICS="${TAILSCALE_ENABLE_METRICS:-1}"
-# Tailscale machine name. Defaults to the host's hostname.
-TAILSCALE_HOSTNAME="${TAILSCALE_HOSTNAME:-$(hostname)}"
+# Tailscale machine name. Leave empty (the default) to let Tailscale pick its
+# recommended hostname - the OS hostname sanitized into a DNS-safe name - rather
+# than forcing the host's raw hostname. Set it to override with a fixed name.
+TAILSCALE_HOSTNAME="${TAILSCALE_HOSTNAME:-}"
 # ---------------------------------------------------------------------------
 
 # Privilege escalation, mirrors the other DollarDeploy scripts.
@@ -125,12 +127,17 @@ fi
 ACCEPT_DNS_FLAG="false"
 [ "${TAILSCALE_ACCEPT_DNS}" = "1" ] && ACCEPT_DNS_FLAG="true"
 
-UP_ARGS=(--authkey="${AUTHKEY}" --hostname="${TAILSCALE_HOSTNAME}" --accept-dns="${ACCEPT_DNS_FLAG}")
+UP_ARGS=(--authkey="${AUTHKEY}" --accept-dns="${ACCEPT_DNS_FLAG}")
+# Only pin the hostname when one is set; otherwise let Tailscale use its
+# recommended name.
+if [ -n "${TAILSCALE_HOSTNAME}" ]; then
+  UP_ARGS+=(--hostname="${TAILSCALE_HOSTNAME}")
+fi
 if [ -n "${TAILSCALE_EXTRA_ARGS}" ]; then
   read -ra EXTRA <<< "${TAILSCALE_EXTRA_ARGS}"
   UP_ARGS+=("${EXTRA[@]}")
 fi
-echo "tailscale: bringing node up as '${TAILSCALE_HOSTNAME}' (ephemeral=${TAILSCALE_EPHEMERAL})"
+echo "tailscale: bringing node up as '${TAILSCALE_HOSTNAME:-<tailscale-recommended>}' (ephemeral=${TAILSCALE_EPHEMERAL})"
 $run tailscale up "${UP_ARGS[@]}"
 
 # --- Metrics (tailnet-internal only) ----------------------------------------
@@ -146,16 +153,21 @@ TAILSCALE_IP4="$($run tailscale ip -4 2>/dev/null | head -n1 || true)"
 TAILSCALE_IP6="$($run tailscale ip -6 2>/dev/null | head -n1 || true)"
 TAILSCALE_DNSNAME=""
 if command -v jq >/dev/null 2>&1; then
-  TAILSCALE_DNSNAME="$($run tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // ""' | sed 's/\.$//' || true)"
+  STATUS_JSON="$($run tailscale status --json 2>/dev/null || true)"
+  TAILSCALE_DNSNAME="$(printf '%s' "${STATUS_JSON}" | jq -r '.Self.DNSName // ""' | sed 's/\.$//' || true)"
+  # When no hostname was pinned, report the recommended name Tailscale assigned.
+  if [ -z "${TAILSCALE_HOSTNAME}" ]; then
+    TAILSCALE_HOSTNAME="$(printf '%s' "${STATUS_JSON}" | jq -r '.Self.HostName // ""' || true)"
+  fi
 fi
 
-echo "tailscale: node IPv4 ${TAILSCALE_IP4:-unknown}, hostname ${TAILSCALE_HOSTNAME}"
+echo "tailscale: node IPv4 ${TAILSCALE_IP4:-unknown}, hostname ${TAILSCALE_HOSTNAME:-unknown}"
 
 # Push values into this service's env. Namespaced by SERVICE_ID so multiple
 # custom services don't collide (see lib/queue/prepareHost.ts). Only emitted
 # when running under DollarDeploy (SERVICE_ID is set).
 if [ -n "${SERVICE_ID:-}" ]; then
-  echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_HOSTNAME:${TAILSCALE_HOSTNAME}}}"
+  [ -n "${TAILSCALE_HOSTNAME}" ] && echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_HOSTNAME:${TAILSCALE_HOSTNAME}}}"
   [ -n "${TAILSCALE_IP4}" ] && echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_IP:${TAILSCALE_IP4}}}"
   [ -n "${TAILSCALE_IP6}" ] && echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_IP6:${TAILSCALE_IP6}}}"
   [ -n "${TAILSCALE_DNSNAME}" ] && echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_DNSNAME:${TAILSCALE_DNSNAME}}}"
