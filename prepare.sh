@@ -138,6 +138,7 @@ if [ -n "${TAILSCALE_EXTRA_ARGS}" ]; then
   UP_ARGS+=("${EXTRA[@]}")
 fi
 echo "tailscale: bringing node up as '${TAILSCALE_HOSTNAME:-<tailscale-recommended>}' (ephemeral=${TAILSCALE_EPHEMERAL})"
+echo "${UP_ARGS[@]}"
 $run tailscale up "${UP_ARGS[@]}"
 
 # --- Metrics (tailnet-internal only) ----------------------------------------
