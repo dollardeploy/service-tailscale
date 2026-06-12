@@ -1,4 +1,4 @@
-# Tailscale
+# tailscale
 
 Custom DollarDeploy service that joins the host to your
 [Tailscale](https://tailscale.com) tailnet, installed from the official
