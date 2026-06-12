@@ -27,6 +27,16 @@ TAILSCALE_EPHEMERAL="${TAILSCALE_EPHEMERAL:-0}"
 # Extra flags passed verbatim to `tailscale up` (e.g. tags, routes, exit node).
 # Empty by default.
 TAILSCALE_EXTRA_ARGS="${TAILSCALE_EXTRA_ARGS:-}"
+# Advertise this machine as an exit node so the tailnet can route internet
+# traffic through it. Off by default; when 1 it adds --advertise-exit-node and
+# enables IP forwarding.
+TAILSCALE_EXIT_NODE="${TAILSCALE_EXIT_NODE:-0}"
+# Pass --reset on `tailscale up` so this script's flags are authoritative: any
+# preference set on a previous run but not mentioned here reverts to its
+# default. Without it, re-running up with a changed flag set fails with
+# "requires mentioning all non-default flags". Set to 0 to preserve out-of-band
+# settings (then you must restate them yourself on every change).
+TAILSCALE_RESET="${TAILSCALE_RESET:-1}"
 # tailscaled state directory. The apt package already stores state here.
 TAILSCALE_STATE_DIR="${TAILSCALE_STATE_DIR:-/var/lib/tailscale}"
 # Use userspace networking instead of the kernel /dev/net/tun device.
@@ -102,7 +112,7 @@ $run systemctl enable tailscaled
 $run systemctl restart tailscaled
 
 # --- Enable IP forwarding when routing/exit-node is requested ---------------
-if printf '%s' "${TAILSCALE_EXTRA_ARGS}" | grep -qE "advertise-routes|advertise-exit-node"; then
+if [ "${TAILSCALE_EXIT_NODE}" = "1" ] || printf '%s' "${TAILSCALE_EXTRA_ARGS}" | grep -qE "advertise-routes|advertise-exit-node"; then
   echo "tailscale: enabling IP forwarding for subnet routing / exit node"
   {
     echo "net.ipv4.ip_forward = 1"
@@ -128,10 +138,18 @@ ACCEPT_DNS_FLAG="false"
 [ "${TAILSCALE_ACCEPT_DNS}" = "1" ] && ACCEPT_DNS_FLAG="true"
 
 UP_ARGS=(--authkey="${AUTHKEY}" --accept-dns="${ACCEPT_DNS_FLAG}")
+# Make this run authoritative so changing flags between prepares doesn't fail.
+if [ "${TAILSCALE_RESET}" = "1" ]; then
+  UP_ARGS+=(--reset)
+fi
 # Only pin the hostname when one is set; otherwise let Tailscale use its
 # recommended name.
 if [ -n "${TAILSCALE_HOSTNAME}" ]; then
   UP_ARGS+=(--hostname="${TAILSCALE_HOSTNAME}")
+fi
+# Advertise as an exit node when requested; skip if it is already in extra args.
+if [ "${TAILSCALE_EXIT_NODE}" = "1" ] && ! printf '%s' "${TAILSCALE_EXTRA_ARGS}" | grep -q "advertise-exit-node"; then
+  UP_ARGS+=(--advertise-exit-node)
 fi
 if [ -n "${TAILSCALE_EXTRA_ARGS}" ]; then
   read -ra EXTRA <<< "${TAILSCALE_EXTRA_ARGS}"
