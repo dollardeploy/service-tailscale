@@ -68,8 +68,8 @@ TAILSCALE_TAGS="${TAILSCALE_TAGS:-}"
 #   empty      - none
 # Services on this node that are not wanted are removed.
 TAILSCALE_SERVICES="${TAILSCALE_SERVICES-auto}"
-# Also serve plain HTTP on port 80 of each service. DollarDeploy builds http://
-# APP_URLs for .ts.net hostnames, so links and redirects the app makes keep working.
+# Also listen on plain HTTP port 80 of each service and redirect it to HTTPS, so
+# http:// links to the app keep working.
 TAILSCALE_SERVICES_HTTP="${TAILSCALE_SERVICES_HTTP:-1}"
 # Seconds to wait for each `tailscale serve` call. It blocks when HTTPS
 # certificates are not enabled for the tailnet.
@@ -267,10 +267,10 @@ if [ "${#SERVICES[@]}" -gt 0 ]; then
     exit 1
   fi
 
-  # Tailscale Services need tailscale >= 1.86.
+  # Tailscale Services need >= 1.86, the HTTP to HTTPS redirect >= 1.92.
   TS_VERSION="$(tailscale version | head -n1)"
-  if [ "$(printf '%s\n' "1.86.0" "${TS_VERSION}" | sort -V | head -n1)" != "1.86.0" ]; then
-    echo "tailscale: upgrading ${TS_VERSION}, Tailscale Services need >= 1.86"
+  if [ "$(printf '%s\n' "1.92.0" "${TS_VERSION}" | sort -V | head -n1)" != "1.92.0" ]; then
+    echo "tailscale: upgrading ${TS_VERSION}, Tailscale Services need >= 1.92"
     $run apt-get update
     $run env DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade tailscale
   fi
@@ -290,6 +290,20 @@ if [ "${#SERVICES[@]}" -gt 0 ]; then
     done
     SERVICE_URLS="${SERVICE_URLS:+${SERVICE_URLS},}https://${SVC}.${DNS_SUFFIX}"
   done
+
+  # The CLI has no redirect target, so swap the port 80 proxy handlers for a
+  # permanent redirect to HTTPS in the raw serve config.
+  if [ "${TAILSCALE_SERVICES_HTTP}" = "1" ]; then
+    echo "tailscale: redirecting HTTP to HTTPS on port 80 of the services"
+    # shellcheck disable=SC2016 # ${HOST} and ${REQUEST_URI} are expanded by tailscale
+    $run tailscale serve status --json \
+      | jq '.Services |= with_entries(if .value.Web then .value.Web |= with_entries(
+          if (.key | endswith(":80"))
+          then .value.Handlers = {"/": {"Redirect": "301:https://${HOST}${REQUEST_URI}"}}
+          else . end
+        ) else . end)' \
+      | $run tailscale serve set-raw
+  fi
 
   # `tailscale serve` exits 0 without changes when HTTPS is not enabled yet.
   SERVED="$($run tailscale serve status --json | jq -r '(.Services // {}) | keys[]')"

@@ -53,7 +53,7 @@ What it does:
 | `TAILSCALE_LOCAL_ADDR_PORT`     | `0.0.0.0:4000`       | Container-only; host metrics are fixed to the tailnet IP `:5252`.                      |
 | `TAILSCALE_TAGS` | _(none)_ | Comma separated ACL tags (`--advertise-tags`), e.g. `tag:dollardeploy`. Required for services. |
 | `TAILSCALE_SERVICES` | `auto` | Apps exposed as Tailscale Services: `auto`, a list like `app1,app2`, or empty for none. |
-| `TAILSCALE_SERVICES_HTTP` | `1` | Also serve plain HTTP on port 80 of each service. |
+| `TAILSCALE_SERVICES_HTTP` | `1` | Also listen on HTTP port 80 of each service and redirect it to HTTPS. |
 | `TAILSCALE_SERVE_TIMEOUT` | `60` | Seconds to wait for each `tailscale serve` call. |
 
 > Boolean settings use `1` (on) / `0` (off).
@@ -127,7 +127,7 @@ The service URLs are exported as `TAILSCALE_SERVICE_URLS`.
 
 Notes:
 
-- Requires Tailscale >= 1.86; the script upgrades the package when needed.
+- Requires Tailscale >= 1.92; the script upgrades the package when needed.
 - All tailnet traffic reaches nginx from `127.0.0.1`, so the app sees the client
   in `X-Forwarded-For` and the per-app rate limit is shared by all tailnet users.
 - Tailscale adds `Tailscale-User-Login` / `Tailscale-User-Name` headers with the
