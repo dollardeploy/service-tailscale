@@ -58,6 +58,22 @@ TAILSCALE_ENABLE_METRICS="${TAILSCALE_ENABLE_METRICS:-1}"
 # recommended hostname - the OS hostname sanitized into a DNS-safe name - rather
 # than forcing the host's raw hostname. Set it to override with a fixed name.
 TAILSCALE_HOSTNAME="${TAILSCALE_HOSTNAME:-}"
+# Comma separated ACL tags advertised by this node (--advertise-tags), e.g.
+# tag:dollardeploy. Required for TAILSCALE_SERVICES: service hosts must be tagged.
+TAILSCALE_TAGS="${TAILSCALE_TAGS:-}"
+# Apps exposed as Tailscale Services (https://<name>.<tailnet>.ts.net), proxied
+# to nginx on 127.0.0.1:80, which routes them by Host header to the app.
+#   auto       - every app whose hostname is <name>.<tailnet>.ts.net (default)
+#   app1,app2  - exactly these services (svc: prefix optional)
+#   empty      - none
+# Services on this node that are not wanted are removed.
+TAILSCALE_SERVICES="${TAILSCALE_SERVICES-auto}"
+# Also serve plain HTTP on port 80 of each service. DollarDeploy builds http://
+# APP_URLs for .ts.net hostnames, so links and redirects the app makes keep working.
+TAILSCALE_SERVICES_HTTP="${TAILSCALE_SERVICES_HTTP:-1}"
+# Seconds to wait for each `tailscale serve` call. It blocks when HTTPS
+# certificates are not enabled for the tailnet.
+TAILSCALE_SERVE_TIMEOUT="${TAILSCALE_SERVE_TIMEOUT:-60}"
 # ---------------------------------------------------------------------------
 
 # Privilege escalation, mirrors the other DollarDeploy scripts.
@@ -151,12 +167,17 @@ fi
 if [ "${TAILSCALE_EXIT_NODE}" = "1" ] && ! printf '%s' "${TAILSCALE_EXTRA_ARGS}" | grep -q "advertise-exit-node"; then
   UP_ARGS+=(--advertise-exit-node)
 fi
+# Restate tags on every run, --reset would drop them otherwise.
+if [ -n "${TAILSCALE_TAGS}" ] && ! printf '%s' "${TAILSCALE_EXTRA_ARGS}" | grep -q "advertise-tags"; then
+  UP_ARGS+=(--advertise-tags="${TAILSCALE_TAGS}")
+fi
 if [ -n "${TAILSCALE_EXTRA_ARGS}" ]; then
   read -ra EXTRA <<< "${TAILSCALE_EXTRA_ARGS}"
   UP_ARGS+=("${EXTRA[@]}")
 fi
 echo "tailscale: bringing node up as '${TAILSCALE_HOSTNAME:-<tailscale-recommended>}' (ephemeral=${TAILSCALE_EPHEMERAL})"
-echo "${UP_ARGS[@]}"
+# Skip the first argument, the auth key is a secret.
+echo "${UP_ARGS[@]:1}"
 $run tailscale up "${UP_ARGS[@]}"
 
 # --- Metrics (tailnet-internal only) ----------------------------------------
@@ -182,6 +203,102 @@ fi
 
 echo "tailscale: node IPv4 ${TAILSCALE_IP4:-unknown}, hostname ${TAILSCALE_HOSTNAME:-unknown}"
 
+# --- Tailscale Services -----------------------------------------------------
+# Each service gets its own MagicDNS name and forwards to nginx on :80. Tailscale
+# keeps the Host header, so nginx picks the app whose hostname is the service name.
+if ! command -v jq >/dev/null 2>&1; then
+  $run env DEBIAN_FRONTEND=noninteractive apt-get install -y jq
+fi
+STATUS_JSON="$($run tailscale status --json)"
+DNS_SUFFIX="$(printf '%s' "${STATUS_JSON}" | jq -r '.MagicDNSSuffix // ""')"
+
+# Prints the wanted service names, one per line, as listed or discovered.
+wanted_services() {
+  if [ "${TAILSCALE_SERVICES}" != "auto" ]; then
+    printf '%s\n' "${TAILSCALE_SERVICES}" | tr ',' '\n'
+    return
+  fi
+  if [ -z "${DNS_SUFFIX}" ]; then
+    echo "tailscale: MagicDNS is off, no app hostnames to discover" >&2
+    return
+  fi
+  # Hostnames of the deployed apps, keeping <name>.<tailnet>.ts.net but not the
+  # node's own MagicDNS name.
+  local suffix_re="\\.${DNS_SUFFIX//./\\.}\$"
+  $run sh -c 'cat /etc/nginx/sites-enabled/* 2>/dev/null' \
+    | grep -oP '^\s*server_name\s+\K[^;]+' \
+    | tr ' ' '\n' \
+    | grep -vixF "${TAILSCALE_DNSNAME}" \
+    | grep -iE "^[a-z0-9-]+${suffix_re}" \
+    | sed -E "s/${suffix_re}//I" || true
+}
+
+mapfile -t SERVICES < <(
+  wanted_services \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/^[[:space:]]*(svc:)?//; s/[[:space:]]*$//' \
+    | grep -v '^$' \
+    | sort -u || true
+)
+for SVC in "${SERVICES[@]}"; do
+  if [[ ! "${SVC}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
+    echo "tailscale: invalid service name '${SVC}', use a single DNS label like app1"
+    exit 1
+  fi
+done
+
+# Remove services configured on this node that are no longer wanted.
+mapfile -t CURRENT_SERVICES < <($run tailscale serve status --json | jq -r '(.Services // {}) | keys[]' | sed 's/^svc://')
+for SVC in "${CURRENT_SERVICES[@]}"; do
+  if ! printf '%s\n' "${SERVICES[@]}" | grep -qxF "${SVC}"; then
+    echo "tailscale: removing service svc:${SVC}"
+    $run tailscale serve drain "svc:${SVC}" || true
+    $run tailscale serve clear "svc:${SVC}"
+  fi
+done
+
+SERVICE_URLS=""
+if [ "${#SERVICES[@]}" -gt 0 ]; then
+  if [ "$(printf '%s' "${STATUS_JSON}" | jq -r '(.Self.Tags // []) | length')" = "0" ]; then
+    echo "tailscale: services ${SERVICES[*]} need a tagged node, set TAILSCALE_TAGS (e.g. tag:dollardeploy)"
+    exit 1
+  fi
+
+  # Tailscale Services need tailscale >= 1.86.
+  TS_VERSION="$(tailscale version | head -n1)"
+  if [ "$(printf '%s\n' "1.86.0" "${TS_VERSION}" | sort -V | head -n1)" != "1.86.0" ]; then
+    echo "tailscale: upgrading ${TS_VERSION}, Tailscale Services need >= 1.86"
+    $run apt-get update
+    $run env DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade tailscale
+  fi
+
+  SERVE_LISTENERS=(--https=443)
+  if [ "${TAILSCALE_SERVICES_HTTP}" = "1" ]; then
+    SERVE_LISTENERS+=(--http=80)
+  fi
+
+  for SVC in "${SERVICES[@]}"; do
+    for LISTENER in "${SERVE_LISTENERS[@]}"; do
+      echo "tailscale: serving svc:${SVC} ${LISTENER} -> nginx http://127.0.0.1:80"
+      if ! timeout "${TAILSCALE_SERVE_TIMEOUT}" $run tailscale serve --yes --service="svc:${SVC}" "${LISTENER}" http://127.0.0.1:80; then
+        echo "tailscale: serving svc:${SVC} failed, check HTTPS certificates are enabled in the tailnet DNS settings"
+        exit 1
+      fi
+    done
+    SERVICE_URLS="${SERVICE_URLS:+${SERVICE_URLS},}https://${SVC}.${DNS_SUFFIX}"
+  done
+
+  # `tailscale serve` exits 0 without changes when HTTPS is not enabled yet.
+  SERVED="$($run tailscale serve status --json | jq -r '(.Services // {}) | keys[]')"
+  for SVC in "${SERVICES[@]}"; do
+    if ! printf '%s\n' "${SERVED}" | grep -qxF "svc:${SVC}"; then
+      echo "tailscale: svc:${SVC} was not applied, check HTTPS certificates are enabled in the tailnet DNS settings"
+      exit 1
+    fi
+  done
+  echo "tailscale: serving ${SERVICE_URLS} (pending until the services are approved in the admin console)"
+fi
+
 # Push values into this service's env. Namespaced by SERVICE_ID so multiple
 # custom services don't collide (see lib/queue/prepareHost.ts). Only emitted
 # when running under DollarDeploy (SERVICE_ID is set).
@@ -191,6 +308,7 @@ if [ -n "${SERVICE_ID:-}" ]; then
   [ -n "${TAILSCALE_IP6}" ] && echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_IP6:${TAILSCALE_IP6}}}"
   [ -n "${TAILSCALE_DNSNAME}" ] && echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_DNSNAME:${TAILSCALE_DNSNAME}}}"
   [ -n "${TAILSCALE_IP4}" ] && echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_METRICS_URL:http://${TAILSCALE_IP4}:5252/metrics}}"
+  [ -n "${SERVICE_URLS}" ] && echo "{{env:SERVICE_CUSTOM_${SERVICE_ID}_TAILSCALE_SERVICE_URLS:${SERVICE_URLS}}}"
 fi
 
 echo "tailscale: done"
