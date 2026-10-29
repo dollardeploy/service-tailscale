@@ -36,25 +36,25 @@ What it does:
 
 ## Settings (override via host/service env vars)
 
-| Env var                         | Default              | Description                                                                            |
-| ------------------------------- | -------------------- | -------------------------------------------------------------------------------------- |
-| `TAILSCALE_AUTH_SECRET`         | _(required)_         | Auth key / OAuth client secret used by `tailscale up`.                                 |
-| `TAILSCALE_EPHEMERAL`           | `0`                  | Register as ephemeral (appends `?ephemeral=true` to the key).                          |
-| `TAILSCALE_HOSTNAME`            | _(Tailscale-chosen)_ | Tailscale machine name (`--hostname`). Empty lets Tailscale pick its recommended name. |
-| `TAILSCALE_ACCEPT_DNS`          | `1`                  | Accept tailnet DNS config (`--accept-dns`).                                            |
-| `TAILSCALE_EXTRA_ARGS`          | _(none)_             | Extra flags passed verbatim to `tailscale up` (tags, routes, exit node).               |
-| `TAILSCALE_EXIT_NODE`           | `0`                  | Advertise as an exit node (`--advertise-exit-node`); also enables IP forwarding.       |
-| `TAILSCALE_RESET`               | `1`                  | Pass `--reset` so each prepare applies the configured flags; `0` keeps prior settings. |
-| `TAILSCALE_USERSPACE`           | `0`                  | Userspace networking instead of kernel `/dev/net/tun` (`--tun=userspace-networking`).  |
-| `TAILSCALE_ENABLE_METRICS`      | `1`                  | Expose client metrics on the tailnet IP `:5252` (`tailscale set --webclient`).         |
-| `TAILSCALE_STATE_DIR`           | `/var/lib/tailscale` | State directory (informational; matches the package default).                          |
-| `TAILSCALE_AUTH_ONCE`           | `0`                  | Container-only; no host equivalent (host `up` runs once, idempotently).                |
-| `TAILSCALE_ENABLE_HEALTH_CHECK` | `1`                  | Container-only; on a host use `tailscale status`.                                      |
-| `TAILSCALE_LOCAL_ADDR_PORT`     | `0.0.0.0:4000`       | Container-only; host metrics are fixed to the tailnet IP `:5252`.                      |
-| `TAILSCALE_TAGS` | _(none)_ | Comma separated ACL tags (`--advertise-tags`), e.g. `tag:dollardeploy`. Required for services. |
-| `TAILSCALE_SERVICES` | `auto` | Apps exposed as Tailscale Services: `auto`, a list like `app1,app2`, or empty for none. |
-| `TAILSCALE_SERVICES_HTTP` | `1` | Also listen on HTTP port 80 of each service and redirect it to HTTPS. |
-| `TAILSCALE_SERVE_TIMEOUT` | `60` | Seconds to wait for each `tailscale serve` call. |
+| Env var                         | Default              | Description                                                                                    |
+| ------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------- |
+| `TAILSCALE_AUTH_SECRET`         | _(required)_         | Auth key / OAuth client secret used by `tailscale up`.                                         |
+| `TAILSCALE_EPHEMERAL`           | `0`                  | Register as ephemeral (appends `?ephemeral=true` to the key).                                  |
+| `TAILSCALE_HOSTNAME`            | _(Tailscale-chosen)_ | Tailscale machine name (`--hostname`). Empty lets Tailscale pick its recommended name.         |
+| `TAILSCALE_ACCEPT_DNS`          | `1`                  | Accept tailnet DNS config (`--accept-dns`).                                                    |
+| `TAILSCALE_EXTRA_ARGS`          | _(none)_             | Extra flags passed verbatim to `tailscale up` (tags, routes, exit node).                       |
+| `TAILSCALE_EXIT_NODE`           | `0`                  | Advertise as an exit node (`--advertise-exit-node`); also enables IP forwarding.               |
+| `TAILSCALE_RESET`               | `1`                  | Pass `--reset` so each prepare applies the configured flags; `0` keeps prior settings.         |
+| `TAILSCALE_USERSPACE`           | `0`                  | Userspace networking instead of kernel `/dev/net/tun` (`--tun=userspace-networking`).          |
+| `TAILSCALE_ENABLE_METRICS`      | `1`                  | Expose client metrics on the tailnet IP `:5252` (`tailscale set --webclient`).                 |
+| `TAILSCALE_STATE_DIR`           | `/var/lib/tailscale` | State directory (informational; matches the package default).                                  |
+| `TAILSCALE_AUTH_ONCE`           | `0`                  | Container-only; no host equivalent (host `up` runs once, idempotently).                        |
+| `TAILSCALE_ENABLE_HEALTH_CHECK` | `1`                  | Container-only; on a host use `tailscale status`.                                              |
+| `TAILSCALE_LOCAL_ADDR_PORT`     | `0.0.0.0:4000`       | Container-only; host metrics are fixed to the tailnet IP `:5252`.                              |
+| `TAILSCALE_TAGS`                | _(none)_             | Comma separated ACL tags (`--advertise-tags`), e.g. `tag:dollardeploy`. Required for services. |
+| `TAILSCALE_SERVICES`            | `auto`               | Apps exposed as Tailscale Services: `auto`, a list like `app1,app2`, or empty for none.        |
+| `TAILSCALE_SERVICES_HTTP`       | `1`                  | Also listen on HTTP port 80 of each service and redirect it to HTTPS.                          |
+| `TAILSCALE_SERVE_TIMEOUT`       | `60`                 | Seconds to wait for each `tailscale serve` call.                                               |
 
 > Boolean settings use `1` (on) / `0` (off).
 
@@ -120,6 +120,9 @@ wanted are drained and removed on the next prepare.
    - **Restrict access to specific IP addresses only**: `127.0.0.1`. The nginx site also answers on the
      public IP, so without this anyone sending `Host: app1.<tailnet>.ts.net` to
      the server reaches the app. Tailscale connects from loopback.
+   - env `APP_URL_HTTPS=1`, so `APP_URL` is `https://app1.<tailnet>.ts.net` and
+     the app sees `X-Forwarded-Proto: https`. Tailscale terminates TLS in front
+     of nginx, apps that build absolute URLs (e.g. Graylog) need this.
 3. Deploy the apps, then **Prepare** the host. The service picks up new app
    hostnames on each prepare, so prepare again after adding an app.
 
