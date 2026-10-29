@@ -260,7 +260,10 @@ done
 SERVICE_URLS=""
 if [ "${#SERVICES[@]}" -gt 0 ]; then
   if [ "$(printf '%s' "${STATUS_JSON}" | jq -r '(.Self.Tags // []) | length')" = "0" ]; then
-    echo "tailscale: services ${SERVICES[*]} need a tagged node, set TAILSCALE_TAGS (e.g. tag:dollardeploy)"
+    # Tags only apply when a node registers, so a node that joined untagged stays
+    # untagged even with --advertise-tags.
+    echo "tailscale: services ${SERVICES[*]} need a tagged node. Set TAILSCALE_TAGS (e.g. tag:dollardeploy)"
+    echo "tailscale: and add the same tag to this machine in the admin console (Machines > Edit ACL tags)"
     exit 1
   fi
 
