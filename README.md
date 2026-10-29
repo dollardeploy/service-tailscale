@@ -51,7 +51,6 @@ What it does:
 | `TAILSCALE_AUTH_ONCE`           | `0`                  | Container-only; no host equivalent (host `up` runs once, idempotently).                |
 | `TAILSCALE_ENABLE_HEALTH_CHECK` | `1`                  | Container-only; on a host use `tailscale status`.                                      |
 | `TAILSCALE_LOCAL_ADDR_PORT`     | `0.0.0.0:4000`       | Container-only; host metrics are fixed to the tailnet IP `:5252`.                      |
-
 | `TAILSCALE_TAGS` | _(none)_ | Comma separated ACL tags (`--advertise-tags`), e.g. `tag:dollardeploy`. Required for services. |
 | `TAILSCALE_SERVICES` | `auto` | Apps exposed as Tailscale Services: `auto`, a list like `app1,app2`, or empty for none. |
 | `TAILSCALE_SERVICES_HTTP` | `1` | Also serve plain HTTP on port 80 of each service. |
